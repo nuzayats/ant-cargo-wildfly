@@ -1,0 +1,153 @@
+<project name="wildfly-deploy" basedir="." default="usage">
+    <target name="usage">
+        <echo>
+PREREQUISITES
+    This script tested on Apache Ant(TM) version 1.9.4, Mac OS X 10.9.5.
+    
+    You can easily gather dependent jars using pom.xml
+    In the same directory to this script. see pom.xml for detail.
+    
+    This script depends on following packages.
+    Make sure that jar files of these packages are available in ~/.ant/lib or somewhere.
+    
+        * cargo (tested against 1.4.12) http://cargo.codehaus.org/Downloads
+        * wildfly-controller-client (tested against 8.2.0.Final)
+        * jsch (tested against 0.1.51)
+    
+    Deployment targets assume following condition:
+    
+        * Place your ssh secret key in $HOME/.ssh/id_rsa with no passphrase
+        * The server is registered in $HOME/.ssh/known_hosts
+        * The container is registered as a service on the server
+        * The user who used to login the server allowed to execute "sudo service"
+    
+OPTIONS
+    -Dssh.host=www.example.com
+        Hostname of the ssh server.
+    
+    -Dssh.username=wildfly
+        Username of the ssh server.
+    
+    -Dcontainer.hostname=localhost
+        Hostname of the container for the ssh server. default is localhost.
+    
+    -Dssh.tunnel.port.local=39990
+        The local port of the tunnel. default is 39990.
+    
+    -Dssh.tunnel.port.remote=9990
+        The remote port of the tunnel. default is 9990.
+    
+    -Dcontainer.username=wildfly
+        Username of the container.
+    
+    -Dcontainer.password=***
+        Password of the container.
+    
+    -Ddeployable.file=/path/to/deployable.war
+        Path to deployment package (e.g. WAR, EJB-JAR or EAR)
+    
+    -Ddeployable.type=war
+        Type of deployment package (e.g. war. default is war)
+    
+EXAMPLES
+    To deploy the war
+    
+        $ ant deploy -Dssh.host=www.example.com -Dssh.username=wildfly -Dcontainer.username=wildfly -Dcontainer.password=wildfly -Ddeployable.file=ROOT.war
+    
+    To undeploy the war
+    
+        $ ant undeploy -Dssh.host=www.example.com -Dssh.username=wildfly -Dcontainer.username=wildfly -Dcontainer.password=wildfly -Ddeployable.file=ROOT.war
+    
+    To start the container
+    
+        $ ant start -Dssh.host=www.example.com -Dssh.username=wildfly
+    
+    To stop the container
+    
+        $ ant stop -Dssh.host=www.example.com -Dssh.username=wildfly
+</echo>
+    </target>
+    
+    <property name="container.hostname" value="localhost"/>
+    <property name="container.stop" value="sudo service wildfly stop"/>
+    <property name="container.start" value="sudo service wildfly start"/>
+    <property name="container.timeout" value="180000"/>
+    <property name="container.id" value="wildfly8x"/>
+    
+    <property name="ssh.tunnel.port.local" value="39990"/>
+    <property name="ssh.tunnel.port.remote" value="9990"/>
+    <property name="ssh.keyfile" value="${user.home}/.ssh/id_rsa"/>
+    
+    <property name="deployable.type" value="war"/>
+    
+    <taskdef resource="cargo.tasks"/>
+    
+    <macrodef name="my.cargo.remote">
+        <attribute name="action"/>
+        <sequential>
+            <fail unless="container.hostname"/>
+            <fail unless="container.port"/>
+            <fail unless="container.username"/>
+            <fail unless="container.password"/>
+            <fail unless="deployable.file"/>
+            <taskdef resource="cargo.tasks"/>
+            <cargo containerId="${container.id}" action="@{action}" type="remote">
+                <configuration type="runtime">
+                    <property name="cargo.hostname"                   value="${container.hostname}"/>
+                    <property name="cargo.jboss.management-http.port" value="${container.port}"/>
+                    <property name="cargo.remote.username"            value="${container.username}"/>
+                    <property name="cargo.remote.password"            value="${container.password}"/>
+                    <property name="cargo.timeout"                    value="${container.timeout}"/>
+                    <deployable type="${deployable.type}" file="${deployable.file}"/>
+                </configuration>
+            </cargo>
+        </sequential>
+    </macrodef>
+    
+    <macrodef name="my.cargo.remote.ssh">
+        <attribute name="action"/>
+        <sequential>
+            <fail unless="ssh.host"/>
+            <fail unless="ssh.username"/>
+            <sshsession host="${ssh.host}" username="${ssh.username}" keyfile="${ssh.keyfile}"
+                        localtunnels="${ssh.tunnel.port.local}:${container.hostname}:${ssh.tunnel.port.remote}">
+                <sequential>
+                    <property name="container.hostname" value="${container.hostname}"/>
+                    <property name="container.port" value="${ssh.tunnel.port.local}"/>
+                    <my.cargo.remote action="@{action}"/>
+                </sequential>
+            </sshsession>
+        </sequential>
+    </macrodef>
+    
+    <target name="deploy">
+        <my.cargo.remote.ssh action="deploy"/>
+    </target>
+    
+    <target name="redeploy">
+        <my.cargo.remote.ssh action="redeploy"/>
+    </target>
+    
+    <target name="undeploy">
+        <my.cargo.remote.ssh action="undeploy"/>
+    </target>
+
+    <macrodef name="my.sshexec.usepty">
+        <attribute name="command"/>
+        <sequential>
+            <fail unless="ssh.host"/>
+            <fail unless="ssh.username"/>
+            <sshexec host="${ssh.host}" username="${ssh.username}" keyfile="${ssh.keyfile}" failonerror="true"
+                     usepty="true" command="@{command}"/>
+        </sequential>
+    </macrodef>
+    
+    <target name="stop">
+        <my.sshexec.usepty command="${container.stop}"/>
+    </target>
+    
+    <target name="start">
+        <my.sshexec.usepty command="${container.start}"/>
+    </target>
+    
+</project>
